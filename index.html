@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Signature Overlay Tool</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #111113;
+    --surface: #1C1C1F;
+    --card:    #26262A;
+    --border:  #38383D;
+    --accent:  #5B8DEF;
+    --accent-h:#7AAAF5;
+    --text:    #EDEDF0;
+    --sub:     #8A8A93;
+    --green:   #3DD68C;
+    --red:     #F2614A;
+    --r:       10px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 16px 80px;
+  }
+
+  .header { width: 100%; max-width: 740px; margin-bottom: 28px; }
+  .header h1 { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 4px; }
+  .header h1 span { color: var(--accent); }
+  .header p { color: var(--sub); font-size: 0.88rem; }
+
+  .card {
+    width: 100%; max-width: 740px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 24px 28px;
+    margin-bottom: 14px;
+  }
+  .card-title {
+    font-size: 0.72rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1px;
+    color: var(--sub); margin-bottom: 16px;
+  }
+
+  /* ── Drop zones ── */
+  .drop-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .drop-zone {
+    border: 1.5px dashed var(--border);
+    border-radius: var(--r);
+    padding: 20px 14px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .18s, background .18s;
+    position: relative;
+  }
+  .drop-zone:hover, .drop-zone.over { border-color: var(--accent); background: rgba(91,141,239,.06); }
+  .drop-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .drop-icon  { font-size: 1.6rem; margin-bottom: 5px; }
+  .drop-label { font-size: 0.78rem; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .drop-hint  { font-size: 0.7rem; color: var(--sub); }
+  .drop-name  { margin-top: 6px; font-size: 0.72rem; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ── Page nav ── */
+  .page-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .page-nav button {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 14px; border-radius: 6px;
+    cursor: pointer; font-size: 0.8rem;
+  }
+  .page-nav button:hover { border-color: var(--accent); }
+  .page-nav span { font-size: 0.8rem; color: var(--sub); }
+
+  /* ── Canvas wrapper ── */
+  .canvas-outer {
+    overflow: auto;
+    border-radius: 8px;
+    background: #888;
+    max-height: 72vh;
+    cursor: default;
+  }
+  .canvas-wrap {
+    position: relative;
+    display: inline-block;
+    background: #fff;
+    line-height: 0;
+    user-select: none;
+  }
+  #page-canvas { display: block; }
+
+  /* ── Signature widget ── */
+  #sig-widget {
+    position: absolute;
+    display: none;
+    cursor: move;
+    touch-action: none;
+  }
+  #sig-widget img {
+    width: 100%; height: 100%;
+    display: block;
+    pointer-events: none;
+    /* no border on the image itself */
+  }
+  /* selection box drawn with outline on the widget */
+  #sig-widget.selected {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  /* resize handles — shown only when selected */
+  .rh {
+    position: absolute;
+    width: 10px; height: 10px;
+    background: #fff;
+    border: 2px solid var(--accent);
+    border-radius: 2px;
+    display: none;
+    z-index: 10;
+  }
+  #sig-widget.selected .rh { display: block; }
+
+  .rh-nw { top:-6px; left:-6px;  cursor: nw-resize; }
+  .rh-ne { top:-6px; right:-6px; cursor: ne-resize; }
+  .rh-sw { bottom:-6px; left:-6px;  cursor: sw-resize; }
+  .rh-se { bottom:-6px; right:-6px; cursor: se-resize; }
+  .rh-n  { top:-6px; left:50%; transform:translateX(-50%); cursor: n-resize; }
+  .rh-s  { bottom:-6px; left:50%; transform:translateX(-50%); cursor: s-resize; }
+  .rh-w  { left:-6px; top:50%; transform:translateY(-50%); cursor: w-resize; }
+  .rh-e  { right:-6px; top:50%; transform:translateY(-50%); cursor: e-resize; }
+
+  /* delete button */
+  #sig-widget.selected #del-btn { display: flex; }
+  #del-btn {
+    display: none;
+    position: absolute;
+    top: -26px; right: -6px;
+    background: var(--red);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-size: 11px;
+    padding: 2px 7px;
+    cursor: pointer;
+    align-items: center;
+    gap: 3px;
+    pointer-events: all;
+    z-index: 11;
+    white-space: nowrap;
+  }
+
+  .preview-help {
+    font-size: 0.73rem; color: var(--sub);
+    margin-top: 8px; text-align: center;
+  }
+
+  /* opacity row */
+  .opacity-row {
+    display: flex; align-items: center; gap: 12px; margin-top: 14px;
+  }
+  .opacity-row label { font-size: 0.78rem; color: var(--sub); white-space: nowrap; }
+  .opacity-row input[type=range] {
+    flex: 1; accent-color: var(--accent);
+    height: 4px; cursor: pointer;
+  }
+  .opacity-row span { font-size: 0.78rem; color: var(--sub); width: 36px; text-align: right; }
+
+  /* ── Buttons ── */
+  .btn-row { display: flex; justify-content: flex-end; gap: 10px; }
+  .btn {
+    padding: 10px 24px; border-radius: 8px;
+    font-size: 0.88rem; font-weight: 600;
+    cursor: pointer; border: none;
+    transition: background .18s, opacity .18s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-h); }
+  .btn-primary:disabled { opacity: .38; cursor: default; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+    background: var(--card); border: 1px solid var(--border);
+    color: var(--text); padding: 11px 22px; border-radius: 30px;
+    font-size: 0.83rem; box-shadow: 0 6px 28px rgba(0,0,0,.5);
+    opacity: 0; pointer-events: none; transition: opacity .22s;
+    white-space: nowrap; z-index: 9999;
+  }
+  #toast.show { opacity: 1; }
+  #toast.ok  { border-color: var(--green); color: var(--green); }
+  #toast.err { border-color: var(--red);   color: var(--red); }
+
+  #preview-card { display: none; }
+  #download-card { display: none; }
+
+  @media (max-width: 520px) {
+    .drop-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Signature <span>Overlay</span></h1>
+  <p>Load your PDF and signature PNG — drag to position, pull handles to resize, then download.</p>
+</div>
+
+<!-- Step 1 -->
+<div class="card">
+  <div class="card-title">Step 1 — Load files</div>
+  <div class="drop-row">
+    <div class="drop-zone" id="pdf-drop">
+      <input type="file" accept=".pdf" id="pdf-input" />
+      <div class="drop-icon">📄</div>
+      <div class="drop-label">PDF Document</div>
+      <div class="drop-hint">Click or drag &amp; drop</div>
+      <div class="drop-name" id="pdf-name"></div>
+    </div>
+    <div class="drop-zone" id="sig-drop">
+      <input type="file" accept=".png,image/png" id="sig-input" />
+      <div class="drop-icon">✍️</div>
+      <div class="drop-label">Signature PNG</div>
+      <div class="drop-hint">Transparent background works best</div>
+      <div class="drop-name" id="sig-name"></div>
+    </div>
+  </div>
+  <!-- Signature loaded indicator -->
+  <div id="sig-ready-bar" style="display:none; margin-top:14px; padding:10px 14px; background:rgba(91,141,239,0.08); border:1px solid rgba(91,141,239,0.3); border-radius:8px; display:none; align-items:center; justify-content:space-between; gap:12px;">
+    <span style="font-size:0.8rem; color:var(--sub);">✓ Signature loaded — navigate to the page you want to sign, then:</span>
+    <button id="place-btn" class="btn btn-primary" style="padding:7px 18px; font-size:0.82rem; white-space:nowrap;" disabled>+ Place on this page</button>
+  </div>
+</div>
+
+<!-- Step 2: interactive canvas -->
+<div class="card" id="preview-card">
+  <div class="card-title">Step 2 — Place your signature</div>
+
+  <div class="page-nav">
+    <button id="prev-page">← Prev</button>
+    <span id="page-indicator">Page 1 of 1</span>
+    <button id="next-page">Next →</button>
+  </div>
+
+  <div class="canvas-outer">
+    <div class="canvas-wrap" id="canvas-wrap">
+      <canvas id="page-canvas"></canvas>
+
+      <!-- Draggable / resizable signature widget -->
+      <div id="sig-widget">
+        <button id="del-btn">✕ Remove</button>
+        <img id="sig-img" src="" alt="signature" draggable="false" />
+        <!-- 8 resize handles -->
+        <div class="rh rh-nw" data-dir="nw"></div>
+        <div class="rh rh-n"  data-dir="n"></div>
+        <div class="rh rh-ne" data-dir="ne"></div>
+        <div class="rh rh-e"  data-dir="e"></div>
+        <div class="rh rh-se" data-dir="se"></div>
+        <div class="rh rh-s"  data-dir="s"></div>
+        <div class="rh rh-sw" data-dir="sw"></div>
+        <div class="rh rh-w"  data-dir="w"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="opacity-row">
+    <label for="opacity-slider">Opacity</label>
+    <input type="range" id="opacity-slider" min="10" max="100" value="100" />
+    <span id="opacity-val">100%</span>
+  </div>
+
+  <div class="preview-help" id="preview-help">
+    Signature will appear here once you upload the PNG above — drag to move, pull corners to resize.
+  </div>
+</div>
+
+<!-- Step 3: download -->
+<div class="card" id="download-card">
+  <div class="card-title">Step 3 — Download</div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="apply-btn">Download signed PDF</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ── State ────────────────────────────────────────────────────────────────────
+let pdfBytes   = null;
+let sigBytes   = null;
+let sigDataUrl = null;
+let pdfJsDoc   = null;
+let totalPages = 0;
+let curPage    = 1;
+let SCALE      = 1.5;   // render scale (pts → px)
+
+// Widget position/size in CANVAS pixels
+let wx = 100, wy = 100, ww = 200, wh = 80;
+let sigPlaced = false;
+
+// ── DOM ──────────────────────────────────────────────────────────────────────
+const pdfInput    = document.getElementById('pdf-input');
+const sigInput    = document.getElementById('sig-input');
+const pdfName     = document.getElementById('pdf-name');
+const sigName     = document.getElementById('sig-name');
+const pageCanvas  = document.getElementById('page-canvas');
+const canvasWrap  = document.getElementById('canvas-wrap');
+const sigWidget   = document.getElementById('sig-widget');
+const sigImg      = document.getElementById('sig-img');
+const delBtn      = document.getElementById('del-btn');
+const opSlider    = document.getElementById('opacity-slider');
+const opVal       = document.getElementById('opacity-val');
+const applyBtn    = document.getElementById('apply-btn');
+const prevCard    = document.getElementById('preview-card');
+const dlCard      = document.getElementById('download-card');
+const pageInd     = document.getElementById('page-indicator');
+const helpTxt     = document.getElementById('preview-help');
+
+// ── Drop zone drag highlight ──────────────────────────────────────────────────
+['pdf-drop','sig-drop'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('over'); });
+  el.addEventListener('dragleave', () => el.classList.remove('over'));
+  el.addEventListener('drop', e => {
+    e.preventDefault(); el.classList.remove('over');
+    const f = e.dataTransfer.files[0];
+    if (!f) return;
+    if (id === 'pdf-drop') handlePdf(f); else handleSig(f);
+  });
+});
+
+pdfInput.addEventListener('change', () => pdfInput.files[0] && handlePdf(pdfInput.files[0]));
+sigInput.addEventListener('change', () => sigInput.files[0] && handleSig(sigInput.files[0]));
+
+// ── Load PDF ──────────────────────────────────────────────────────────────────
+async function handlePdf(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) return toast('Please select a PDF file.','err');
+  pdfBytes = await file.arrayBuffer();
+  pdfName.textContent = '✓ ' + file.name;
+  pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  totalPages = pdfJsDoc.numPages;
+  curPage = 1;
+  prevCard.style.display = 'block';
+  await renderPage(curPage);
+  // Enable place button if signature was loaded before the PDF
+  if (sigBytes) document.getElementById('place-btn').disabled = false;
+  checkReady();
+}
+
+// ── Load Signature ────────────────────────────────────────────────────────────
+function handleSig(file) {
+  if (!file.type.includes('png')) return toast('Please select a PNG file.','err');
+  const reader = new FileReader();
+  reader.onload = e => {
+    sigDataUrl = e.target.result;
+    const b64 = e.target.result.split(',')[1];
+    const bin = atob(b64);
+    sigBytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) sigBytes[i] = bin.charCodeAt(i);
+
+    sigName.textContent = '✓ ' + file.name;
+    sigImg.src = sigDataUrl;
+
+    // Show the "place" bar — but don't drop anything on the page yet
+    const bar = document.getElementById('sig-ready-bar');
+    bar.style.display = 'flex';
+    const placeBtn = document.getElementById('place-btn');
+    placeBtn.disabled = !pdfJsDoc;  // enable only if PDF is also loaded
+
+    checkReady();
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Place button — drops signature centred on whatever page is visible now ───
+document.getElementById('place-btn').addEventListener('click', () => {
+  if (!sigBytes || !pdfJsDoc) return;
+
+  const cw = pageCanvas.width, ch = pageCanvas.height;
+  ww = Math.round(cw * 0.28);
+  wh = Math.round(ww * 0.38);
+  wx = Math.round((cw - ww) / 2);
+  wy = Math.round((ch - wh) / 2);   // true centre of visible page
+
+  sigPlaced = true;
+  applyWidgetStyle();
+  sigWidget.style.display = 'block';
+  sigWidget.classList.add('selected');
+  helpTxt.textContent = 'Drag to move · pull handles to resize · click elsewhere to deselect';
+  checkReady();
+
+  // Scroll the canvas into view smoothly
+  document.getElementById('preview-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+});
+
+// ── Render page ───────────────────────────────────────────────────────────────
+async function renderPage(no) {
+  const page = await pdfJsDoc.getPage(no);
+  const vp   = page.getViewport({ scale: SCALE });
+  const ctx  = pageCanvas.getContext('2d');
+  pageCanvas.width  = vp.width;
+  pageCanvas.height = vp.height;
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  pageInd.textContent = `Page ${no} of ${totalPages}`;
+  if (sigPlaced) applyWidgetStyle();
+}
+
+document.getElementById('prev-page').addEventListener('click', async () => {
+  if (curPage > 1) { curPage--; await renderPage(curPage); }
+});
+document.getElementById('next-page').addEventListener('click', async () => {
+  if (curPage < totalPages) { curPage++; await renderPage(curPage); }
+});
+
+// ── Apply widget CSS from wx/wy/ww/wh ────────────────────────────────────────
+function applyWidgetStyle() {
+  sigWidget.style.left   = wx + 'px';
+  sigWidget.style.top    = wy + 'px';
+  sigWidget.style.width  = ww + 'px';
+  sigWidget.style.height = wh + 'px';
+  sigWidget.style.opacity = opSlider.value / 100;
+}
+
+// ── Opacity ───────────────────────────────────────────────────────────────────
+opSlider.addEventListener('input', () => {
+  opVal.textContent = opSlider.value + '%';
+  if (sigPlaced) sigWidget.style.opacity = opSlider.value / 100;
+});
+
+// ── Select / deselect ─────────────────────────────────────────────────────────
+sigWidget.addEventListener('pointerdown', e => {
+  sigWidget.classList.add('selected');
+  e.stopPropagation();
+});
+canvasWrap.addEventListener('pointerdown', e => {
+  if (e.target === canvasWrap || e.target === pageCanvas) {
+    sigWidget.classList.remove('selected');
+  }
+});
+
+// ── Delete ────────────────────────────────────────────────────────────────────
+delBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  sigWidget.style.display = 'none';
+  sigPlaced = false;
+  checkReady();
+});
+
+// ── Drag to move ──────────────────────────────────────────────────────────────
+{
+  let dragging = false, startX, startY, startWx, startWy;
+
+  sigWidget.addEventListener('pointerdown', e => {
+    // Only drag if we're not on a resize handle or delete btn
+    if (e.target.classList.contains('rh') || e.target === delBtn) return;
+    dragging = true;
+    startX = e.clientX; startY = e.clientY;
+    startWx = wx; startWy = wy;
+    sigWidget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  sigWidget.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const cw = pageCanvas.width, ch = pageCanvas.height;
+    wx = Math.max(0, Math.min(cw - ww, startWx + dx));
+    wy = Math.max(0, Math.min(ch - wh, startWy + dy));
+    applyWidgetStyle();
+  });
+
+  sigWidget.addEventListener('pointerup', () => { dragging = false; });
+  sigWidget.addEventListener('pointercancel', () => { dragging = false; });
+}
+
+// ── Resize handles ────────────────────────────────────────────────────────────
+{
+  let resizing = false;
+  let dir, startX, startY, startWx, startWy, startWw, startWh;
+  const MIN = 30;
+
+  document.querySelectorAll('.rh').forEach(handle => {
+    handle.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      resizing = true;
+      dir = handle.dataset.dir;
+      startX = e.clientX; startY = e.clientY;
+      startWx = wx; startWy = wy; startWw = ww; startWh = wh;
+      handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+  });
+
+  window.addEventListener('pointermove', e => {
+    if (!resizing) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    let nx = startWx, ny = startWy, nw = startWw, nh = startWh;
+
+    if (dir.includes('e')) { nw = Math.max(MIN, startWw + dx); }
+    if (dir.includes('s')) { nh = Math.max(MIN, startWh + dy); }
+    if (dir.includes('w')) { nw = Math.max(MIN, startWw - dx); nx = startWx + startWw - nw; }
+    if (dir.includes('n')) { nh = Math.max(MIN, startWh - dy); ny = startWy + startWh - nh; }
+
+    wx = nx; wy = ny; ww = nw; wh = nh;
+    applyWidgetStyle();
+  });
+
+  window.addEventListener('pointerup',     () => { resizing = false; });
+  window.addEventListener('pointercancel', () => { resizing = false; });
+}
+
+// ── Ready check ───────────────────────────────────────────────────────────────
+function checkReady() {
+  const ready = !!(pdfBytes && sigBytes && sigPlaced);
+  applyBtn.disabled = !ready;
+  dlCard.style.display = ready ? 'block' : 'none';
+}
+
+// ── Download ──────────────────────────────────────────────────────────────────
+applyBtn.addEventListener('click', async () => {
+  if (!pdfBytes || !sigBytes || !sigPlaced) return;
+  applyBtn.disabled = true;
+  applyBtn.textContent = 'Processing…';
+  try {
+    const { PDFDocument } = PDFLib;
+    const pdfDoc  = await PDFDocument.load(pdfBytes);
+    const pngImage = await pdfDoc.embedPng(sigBytes);
+    const pages   = pdfDoc.getPages();
+    const page    = pages[curPage - 1];
+    const { width: pageW, height: pageH } = page.getSize();
+
+    // Convert canvas px → PDF pts
+    const xPt =  (wx / SCALE);
+    const yPt =  pageH - (wy / SCALE) - (wh / SCALE);  // flip Y
+    const wPt =  ww / SCALE;
+    const hPt =  wh / SCALE;
+    const op  =  opSlider.value / 100;
+
+    page.drawImage(pngImage, { x: xPt, y: yPt, width: wPt, height: hPt, opacity: op });
+
+    const out  = await pdfDoc.save();
+    const blob = new Blob([out], { type: 'application/pdf' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'signed_document.pdf'; a.click();
+    URL.revokeObjectURL(url);
+    toast('✓ Signed PDF downloaded!', 'ok');
+  } catch(err) {
+    console.error(err);
+    toast('Error: ' + err.message, 'err');
+  } finally {
+    applyBtn.disabled = false;
+    applyBtn.textContent = 'Download signed PDF';
+  }
+});
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'show ' + type;
+  clearTimeout(el._t); el._t = setTimeout(() => { el.className = ''; }, 3400);
+}
+</script>
+</body>
+</html>
