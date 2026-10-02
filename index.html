@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Signature Overlay Tool</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #111113;
+    --surface: #1C1C1F;
+    --card:    #26262A;
+    --border:  #38383D;
+    --accent:  #5B8DEF;
+    --accent-h:#7AAAF5;
+    --text:    #EDEDF0;
+    --sub:     #8A8A93;
+    --green:   #3DD68C;
+    --red:     #F2614A;
+    --r:       10px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 16px 80px;
+  }
+
+  .header { width: 100%; max-width: 740px; margin-bottom: 28px; }
+  .header h1 { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 4px; }
+  .header h1 span { color: var(--accent); }
+  .header p { color: var(--sub); font-size: 0.88rem; }
+
+  .card {
+    width: 100%; max-width: 740px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 24px 28px;
+    margin-bottom: 14px;
+  }
+  .card-title {
+    font-size: 0.72rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1px;
+    color: var(--sub); margin-bottom: 16px;
+  }
+
+  /* ── Drop zones ── */
+  .drop-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .drop-zone {
+    border: 1.5px dashed var(--border);
+    border-radius: var(--r);
+    padding: 20px 14px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .18s, background .18s;
+    position: relative;
+  }
+  .drop-zone:hover, .drop-zone.over { border-color: var(--accent); background: rgba(91,141,239,.06); }
+  .drop-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .drop-icon  { font-size: 1.6rem; margin-bottom: 5px; }
+  .drop-label { font-size: 0.78rem; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .drop-hint  { font-size: 0.7rem; color: var(--sub); }
+  .drop-name  { margin-top: 6px; font-size: 0.72rem; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ── Page nav ── */
+  .page-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .page-nav button {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 14px; border-radius: 6px;
+    cursor: pointer; font-size: 0.8rem;
+  }
+  .page-nav button:hover { border-color: var(--accent); }
+  .page-nav span { font-size: 0.8rem; color: var(--sub); }
+
+  /* ── Canvas wrapper ── */
+  .canvas-outer {
+    overflow: auto;
+    border-radius: 8px;
+    background: #888;
+    max-height: 72vh;
+    cursor: default;
+  }
+  .canvas-wrap {
+    position: relative;
+    display: inline-block;
+    background: #fff;
+    line-height: 0;
+    user-select: none;
+  }
+  #page-canvas { display: block; }
+
+  /* ── Signature widgets (many) ── */
+  .sig-widget {
+    position: absolute;
+    cursor: move;
+    touch-action: none;
+  }
+  .sig-widget img {
+    width: 100%; height: 100%;
+    display: block;
+    pointer-events: none;
+  }
+  .sig-widget.selected {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    z-index: 5;
+  }
+
+  .rh {
+    position: absolute;
+    width: 10px; height: 10px;
+    background: #fff;
+    border: 2px solid var(--accent);
+    border-radius: 2px;
+    display: none;
+    z-index: 10;
+  }
+  .sig-widget.selected .rh { display: block; }
+
+  .rh-nw { top:-6px; left:-6px;  cursor: nw-resize; }
+  .rh-ne { top:-6px; right:-6px; cursor: ne-resize; }
+  .rh-sw { bottom:-6px; left:-6px;  cursor: sw-resize; }
+  .rh-se { bottom:-6px; right:-6px; cursor: se-resize; }
+  .rh-n  { top:-6px; left:50%; transform:translateX(-50%); cursor: n-resize; }
+  .rh-s  { bottom:-6px; left:50%; transform:translateX(-50%); cursor: s-resize; }
+  .rh-w  { left:-6px; top:50%; transform:translateY(-50%); cursor: w-resize; }
+  .rh-e  { right:-6px; top:50%; transform:translateY(-50%); cursor: e-resize; }
+
+  /* per-widget toolbar */
+  .w-tools {
+    display: none;
+    position: absolute;
+    top: -30px; right: -6px;
+    gap: 4px;
+    z-index: 11;
+    line-height: 1;
+  }
+  .sig-widget.tb-below .w-tools { top: auto; bottom: -30px; }
+  .sig-widget.selected .w-tools { display: flex; }
+  .w-tools button {
+    border: none; border-radius: 4px;
+    font-size: 11px; padding: 4px 8px;
+    cursor: pointer; color: #fff; white-space: nowrap;
+  }
+  .w-dup { background: var(--accent); }
+  .w-del { background: var(--red); }
+
+  /* signature library */
+  .sig-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .sig-thumb {
+    position: relative;
+    width: 96px; height: 56px;
+    background: repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%) 50% / 12px 12px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .sig-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
+  .sig-thumb.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(91,141,239,.35); }
+  .sig-thumb .x {
+    position: absolute; top: -8px; right: -8px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--red); color: #fff; border: none;
+    font-size: 10px; line-height: 18px; text-align: center; cursor: pointer;
+    display: none;
+  }
+  .sig-thumb:hover .x { display: block; }
+
+  .preview-help {
+    font-size: 0.73rem; color: var(--sub);
+    margin-top: 8px; text-align: center;
+  }
+
+  /* opacity row */
+  .opacity-row {
+    display: flex; align-items: center; gap: 12px; margin-top: 14px;
+  }
+  .opacity-row label { font-size: 0.78rem; color: var(--sub); white-space: nowrap; }
+  .opacity-row input[type=range] {
+    flex: 1; accent-color: var(--accent);
+    height: 4px; cursor: pointer;
+  }
+  .opacity-row span { font-size: 0.78rem; color: var(--sub); width: 36px; text-align: right; }
+
+  /* ── Buttons ── */
+  .btn-row { display: flex; justify-content: flex-end; gap: 10px; }
+  .btn {
+    padding: 10px 24px; border-radius: 8px;
+    font-size: 0.88rem; font-weight: 600;
+    cursor: pointer; border: none;
+    transition: background .18s, opacity .18s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-h); }
+  .btn-primary:disabled { opacity: .38; cursor: default; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+    background: var(--card); border: 1px solid var(--border);
+    color: var(--text); padding: 11px 22px; border-radius: 30px;
+    font-size: 0.83rem; box-shadow: 0 6px 28px rgba(0,0,0,.5);
+    opacity: 0; pointer-events: none; transition: opacity .22s;
+    white-space: nowrap; z-index: 9999;
+  }
+  #toast.show { opacity: 1; }
+  #toast.ok  { border-color: var(--green); color: var(--green); }
+  #toast.err { border-color: var(--red);   color: var(--red); }
+
+  #preview-card { display: none; }
+  #download-card { display: none; }
+
+  @media (max-width: 520px) {
+    .drop-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Signature <span>Overlay</span></h1>
+  <p>Load your PDF and one or more signature PNGs — place as many as you like on any pages, drag to position, resize, then download.</p>
+</div>
+
+<!-- Step 1 -->
+<div class="card">
+  <div class="card-title">Step 1 — Load files</div>
+  <div class="drop-row">
+    <div class="drop-zone" id="pdf-drop">
+      <input type="file" accept=".pdf" id="pdf-input" />
+      <div class="drop-icon">📄</div>
+      <div class="drop-label">PDF Document</div>
+      <div class="drop-hint">Click or drag &amp; drop</div>
+      <div class="drop-name" id="pdf-name"></div>
+    </div>
+    <div class="drop-zone" id="sig-drop">
+      <input type="file" accept=".png,image/png" id="sig-input" multiple />
+      <div class="drop-icon">✍️</div>
+      <div class="drop-label">Signature PNG(s)</div>
+      <div class="drop-hint">Add one or several — transparent works best</div>
+      <div class="drop-name" id="sig-name"></div>
+    </div>
+  </div>
+  <!-- Signature library + place -->
+  <div id="sig-ready-bar" style="display:none; margin-top:14px; padding:12px 14px; background:rgba(91,141,239,0.08); border:1px solid rgba(91,141,239,0.3); border-radius:8px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <span style="font-size:0.8rem; color:var(--sub);">Pick a signature below, go to the page you want, then place it. Repeat as often as needed.</span>
+      <button id="place-btn" class="btn btn-primary" style="padding:7px 18px; font-size:0.82rem; white-space:nowrap;" disabled>+ Place on this page</button>
+    </div>
+    <div class="sig-thumbs" id="sig-thumbs"></div>
+  </div>
+</div>
+
+<!-- Step 2: interactive canvas -->
+<div class="card" id="preview-card">
+  <div class="card-title">Step 2 — Place your signature</div>
+
+  <div class="page-nav">
+    <button id="prev-page">← Prev</button>
+    <span id="page-indicator">Page 1 of 1</span>
+    <button id="next-page">Next →</button>
+  </div>
+
+  <div class="canvas-outer">
+    <div class="canvas-wrap" id="canvas-wrap">
+      <canvas id="page-canvas"></canvas>
+
+    </div>
+  </div>
+
+  <div class="opacity-row">
+    <label for="opacity-slider">Opacity (selected signature)</label>
+    <input type="range" id="opacity-slider" min="10" max="100" value="100" />
+    <span id="opacity-val">100%</span>
+  </div>
+
+  <div class="preview-help" id="preview-help">
+    Upload a signature PNG above, then click “Place on this page”.
+  </div>
+</div>
+
+<!-- Step 3: download -->
+<div class="card" id="download-card">
+  <div class="card-title">Step 3 — Download</div>
+  <div id="placement-summary" style="font-size:0.8rem; color:var(--sub); margin-bottom:14px;"></div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="apply-btn">Download signed PDF</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ── State ────────────────────────────────────────────────────────────────────
+let pdfBytes   = null;
+let pdfJsDoc   = null;
+let totalPages = 0;
+let curPage    = 1;
+const SCALE    = 1.5;   // render scale (pts → px)
+
+let sigs        = [];   // signature library: {id, name, dataUrl, bytes, nw, nh}
+let activeSigId = null; // which signature "Place" will drop
+let placements  = [];   // {id, sigId, page, x, y, w, h, opacity}  (x/y/w/h in canvas px)
+let selectedId  = null;
+let nextId      = 1;
+
+// ── DOM ──────────────────────────────────────────────────────────────────────
+const pdfInput    = document.getElementById('pdf-input');
+const sigInput    = document.getElementById('sig-input');
+const pdfName     = document.getElementById('pdf-name');
+const sigName     = document.getElementById('sig-name');
+const pageCanvas  = document.getElementById('page-canvas');
+const canvasWrap  = document.getElementById('canvas-wrap');
+const opSlider    = document.getElementById('opacity-slider');
+const opVal       = document.getElementById('opacity-val');
+const applyBtn    = document.getElementById('apply-btn');
+const prevCard    = document.getElementById('preview-card');
+const dlCard      = document.getElementById('download-card');
+const pageInd     = document.getElementById('page-indicator');
+const helpTxt     = document.getElementById('preview-help');
+const placeBtn    = document.getElementById('place-btn');
+const readyBar    = document.getElementById('sig-ready-bar');
+const thumbsEl    = document.getElementById('sig-thumbs');
+const summaryEl   = document.getElementById('placement-summary');
+
+const getSig = id => sigs.find(s => s.id === id);
+const getPl  = id => placements.find(p => p.id === id);
+
+// ── Drop zone drag highlight ──────────────────────────────────────────────────
+['pdf-drop','sig-drop'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('over'); });
+  el.addEventListener('dragleave', () => el.classList.remove('over'));
+  el.addEventListener('drop', e => {
+    e.preventDefault(); el.classList.remove('over');
+    const files = [...e.dataTransfer.files];
+    if (!files.length) return;
+    if (id === 'pdf-drop') handlePdf(files[0]); else files.forEach(handleSig);
+  });
+});
+
+pdfInput.addEventListener('change', () => pdfInput.files[0] && handlePdf(pdfInput.files[0]));
+sigInput.addEventListener('change', () => {
+  [...sigInput.files].forEach(handleSig);
+  sigInput.value = '';   // allow re-adding the same file later
+});
+
+// ── Load PDF ──────────────────────────────────────────────────────────────────
+async function handlePdf(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) return toast('Please select a PDF file.','err');
+  pdfBytes = await file.arrayBuffer();
+  pdfName.textContent = '✓ ' + file.name;
+  pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  totalPages = pdfJsDoc.numPages;
+  curPage = 1;
+  // A new PDF invalidates old placements
+  placements = []; selectedId = null;
+  prevCard.style.display = 'block';
+  await renderPage(curPage);
+  updateUI();
+}
+
+// ── Load Signature(s) ─────────────────────────────────────────────────────────
+function handleSig(file) {
+  if (!file.type.includes('png')) return toast('“' + file.name + '” is not a PNG.','err');
+  const reader = new FileReader();
+  reader.onload = e => {
+    const dataUrl = e.target.result;
+    const bin = atob(dataUrl.split(',')[1]);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+    const img = new Image();
+    img.onload = () => {
+      const sig = { id: nextId++, name: file.name, dataUrl, bytes, nw: img.naturalWidth, nh: img.naturalHeight };
+      sigs.push(sig);
+      activeSigId = sig.id;     // newly added becomes active
+      updateUI();
+    };
+    img.src = dataUrl;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Signature library thumbnails ──────────────────────────────────────────────
+function renderThumbs() {
+  thumbsEl.innerHTML = '';
+  sigs.forEach(sig => {
+    const t = document.createElement('div');
+    t.className = 'sig-thumb' + (sig.id === activeSigId ? ' active' : '');
+    t.title = sig.name;
+    const im = document.createElement('img'); im.src = sig.dataUrl;
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = 'Remove this signature';
+    x.addEventListener('click', ev => { ev.stopPropagation(); removeSig(sig.id); });
+    t.append(im, x);
+    t.addEventListener('click', () => { activeSigId = sig.id; renderThumbs(); updateUI(); });
+    thumbsEl.appendChild(t);
+  });
+}
+
+function removeSig(id) {
+  const used = placements.filter(p => p.sigId === id).length;
+  sigs = sigs.filter(s => s.id !== id);
+  placements = placements.filter(p => p.sigId !== id);
+  if (selectedId && !getPl(selectedId)) selectedId = null;
+  if (activeSigId === id) activeSigId = sigs.length ? sigs[sigs.length - 1].id : null;
+  if (used) toast(`Removed signature and its ${used} placement${used > 1 ? 's' : ''}.`);
+  updateUI();
+}
+
+// ── Place button ──────────────────────────────────────────────────────────────
+placeBtn.addEventListener('click', () => {
+  const sig = getSig(activeSigId);
+  if (!sig || !pdfJsDoc) return;
+
+  const cw = pageCanvas.width, ch = pageCanvas.height;
+  const w = Math.round(cw * 0.28);
+  const h = Math.round(w * (sig.nh / sig.nw));          // keep PNG's own aspect ratio
+  // Offset a little for each signature already on this page so they don't stack exactly
+  const n = placements.filter(p => p.page === curPage).length;
+  const off = (n % 6) * 26;
+  const p = {
+    id: nextId++, sigId: sig.id, page: curPage,
+    x: Math.max(0, Math.min(cw - w, Math.round((cw - w) / 2) + off)),
+    y: Math.max(0, Math.min(ch - h, Math.round((ch - h) / 2) + off)),
+    w, h, opacity: opSlider.value / 100
+  };
+  placements.push(p);
+  selectedId = p.id;
+  renderWidgets();
+  updateUI();
+  prevCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+});
+
+// ── Render page ───────────────────────────────────────────────────────────────
+async function renderPage(no) {
+  const page = await pdfJsDoc.getPage(no);
+  const vp   = page.getViewport({ scale: SCALE });
+  const ctx  = pageCanvas.getContext('2d');
+  pageCanvas.width  = vp.width;
+  pageCanvas.height = vp.height;
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  pageInd.textContent = `Page ${no} of ${totalPages}`;
+  renderWidgets();
+}
+
+async function goToPage(n) {
+  if (n < 1 || n > totalPages || n === curPage) return;
+  curPage = n;
+  await renderPage(curPage);
+  updateUI();
+}
+document.getElementById('prev-page').addEventListener('click', () => goToPage(curPage - 1));
+document.getElementById('next-page').addEventListener('click', () => goToPage(curPage + 1));
+
+// ── Widgets (one DOM element per placement on the current page) ──────────────
+function renderWidgets() {
+  canvasWrap.querySelectorAll('.sig-widget').forEach(el => el.remove());
+  placements.filter(p => p.page === curPage).forEach(p => canvasWrap.appendChild(buildWidget(p)));
+}
+
+function buildWidget(p) {
+  const sig = getSig(p.sigId);
+  const el = document.createElement('div');
+  el.className = 'sig-widget';
+  el.dataset.id = p.id;
+
+  const img = document.createElement('img');
+  img.src = sig.dataUrl; img.draggable = false; img.alt = 'signature';
+  el.appendChild(img);
+
+  const tools = document.createElement('div');
+  tools.className = 'w-tools';
+  const dup = document.createElement('button'); dup.className = 'w-dup'; dup.textContent = '⧉ Duplicate';
+  const del = document.createElement('button'); del.className = 'w-del'; del.textContent = '✕ Remove';
+  dup.addEventListener('pointerdown', e => e.stopPropagation());
+  del.addEventListener('pointerdown', e => e.stopPropagation());
+  dup.addEventListener('click', e => { e.stopPropagation(); duplicatePlacement(p.id); });
+  del.addEventListener('click', e => { e.stopPropagation(); deletePlacement(p.id); });
+  tools.append(dup, del);
+  el.appendChild(tools);
+
+  ['nw','n','ne','e','se','s','sw','w'].forEach(d => {
+    const h = document.createElement('div');
+    h.className = 'rh rh-' + d; h.dataset.dir = d;
+    h.addEventListener('pointerdown', e => startResize(e, p.id, d));
+    el.appendChild(h);
+  });
+
+  el.addEventListener('pointerdown', e => {
+    if (e.target.classList.contains('rh')) return;
+    select(p.id);
+    startMove(e, p.id);
+  });
+
+  styleWidget(el, p);
+  return el;
+}
+
+function styleWidget(el, p) {
+  el.style.left    = p.x + 'px';
+  el.style.top     = p.y + 'px';
+  el.style.width   = p.w + 'px';
+  el.style.height  = p.h + 'px';
+  el.style.opacity = p.opacity;
+  el.classList.toggle('selected', p.id === selectedId);
+  el.classList.toggle('tb-below', p.y < 34);
+}
+function widgetEl(id) { return canvasWrap.querySelector(`.sig-widget[data-id="${id}"]`); }
+
+function select(id) {
+  selectedId = id;
+  canvasWrap.querySelectorAll('.sig-widget').forEach(el => {
+    el.classList.toggle('selected', Number(el.dataset.id) === id);
+  });
+  const p = getPl(id);
+  if (p) { opSlider.value = Math.round(p.opacity * 100); opVal.textContent = opSlider.value + '%'; }
+  updateHelp();
+}
+function deselect() {
+  selectedId = null;
+  canvasWrap.querySelectorAll('.sig-widget.selected').forEach(el => el.classList.remove('selected'));
+  updateHelp();
+}
+
+canvasWrap.addEventListener('pointerdown', e => {
+  if (e.target === canvasWrap || e.target === pageCanvas) deselect();
+});
+
+function deletePlacement(id) {
+  placements = placements.filter(p => p.id !== id);
+  if (selectedId === id) selectedId = null;
+  renderWidgets();
+  updateUI();
+}
+
+function duplicatePlacement(id) {
+  const src = getPl(id); if (!src) return;
+  const cw = pageCanvas.width, ch = pageCanvas.height;
+  const p = { ...src, id: nextId++,
+    x: Math.min(cw - src.w, src.x + 24),
+    y: Math.min(ch - src.h, src.y + 24) };
+  placements.push(p);
+  selectedId = p.id;
+  renderWidgets();
+  updateUI();
+}
+
+document.addEventListener('keydown', e => {
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId &&
+      !['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) {
+    e.preventDefault();
+    deletePlacement(selectedId);
+  }
+});
+
+// ── Opacity (applies to selected signature; also the default for new ones) ───
+opSlider.addEventListener('input', () => {
+  opVal.textContent = opSlider.value + '%';
+  const p = getPl(selectedId);
+  if (p) {
+    p.opacity = opSlider.value / 100;
+    const el = widgetEl(p.id); if (el) el.style.opacity = p.opacity;
+  }
+});
+
+// ── Drag to move / resize (single global interaction) ────────────────────────
+let drag = null;
+
+function startMove(e, id) {
+  const p = getPl(id);
+  drag = { mode: 'move', id, sx: e.clientX, sy: e.clientY, o: { ...p } };
+  e.preventDefault();
+}
+function startResize(e, id, dir) {
+  const p = getPl(id);
+  select(id);
+  drag = { mode: 'resize', id, dir, sx: e.clientX, sy: e.clientY, o: { ...p } };
+  e.stopPropagation(); e.preventDefault();
+}
+
+window.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const p = getPl(drag.id); if (!p) return;
+  const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+  const cw = pageCanvas.width, ch = pageCanvas.height;
+  const o = drag.o;
+
+  if (drag.mode === 'move') {
+    p.x = Math.max(0, Math.min(cw - p.w, o.x + dx));
+    p.y = Math.max(0, Math.min(ch - p.h, o.y + dy));
+  } else {
+    const MIN = 30, d = drag.dir;
+    let nx = o.x, ny = o.y, nw = o.w, nh = o.h;
+    if (d.includes('e')) nw = Math.max(MIN, o.w + dx);
+    if (d.includes('s')) nh = Math.max(MIN, o.h + dy);
+    if (d.includes('w')) { nw = Math.max(MIN, o.w - dx); nx = o.x + o.w - nw; }
+    if (d.includes('n')) { nh = Math.max(MIN, o.h - dy); ny = o.y + o.h - nh; }
+    p.x = nx; p.y = ny; p.w = nw; p.h = nh;
+  }
+  const el = widgetEl(p.id); if (el) styleWidget(el, p);
+});
+const endDrag = () => { drag = null; };
+window.addEventListener('pointerup', endDrag);
+window.addEventListener('pointercancel', endDrag);
+
+// ── UI state ──────────────────────────────────────────────────────────────────
+function updateHelp() {
+  const onPage = placements.filter(p => p.page === curPage).length;
+  if (!sigs.length) helpTxt.textContent = 'Upload a signature PNG above, then click “Place on this page”.';
+  else if (!onPage) helpTxt.textContent = 'Click “Place on this page” to drop the selected signature here. You can place as many as you like.';
+  else helpTxt.textContent = 'Drag to move · pull handles to resize · Delete key removes the selected one · click the page to deselect';
+}
+
+function updateUI() {
+  // library bar
+  readyBar.style.display = sigs.length ? 'block' : 'none';
+  placeBtn.disabled = !(pdfJsDoc && getSig(activeSigId));
+  sigName.textContent = sigs.length ? `✓ ${sigs.length} signature${sigs.length > 1 ? 's' : ''} loaded` : '';
+  renderThumbs();
+  updateHelp();
+
+  // download card
+  const total = placements.length;
+  applyBtn.disabled = !(pdfBytes && total);
+  dlCard.style.display = (pdfBytes && total) ? 'block' : 'none';
+  if (total) {
+    const byPage = {};
+    placements.forEach(p => byPage[p.page] = (byPage[p.page] || 0) + 1);
+    const parts = Object.keys(byPage).sort((a,b) => a-b)
+      .map(pg => `page ${pg}: ${byPage[pg]}`).join(' · ');
+    summaryEl.textContent = `${total} signature${total > 1 ? 's' : ''} placed — ${parts}`;
+  }
+}
+
+// ── Download ──────────────────────────────────────────────────────────────────
+applyBtn.addEventListener('click', async () => {
+  if (!pdfBytes || !placements.length) return;
+  applyBtn.disabled = true;
+  applyBtn.textContent = 'Processing…';
+  try {
+    const { PDFDocument } = PDFLib;
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const pages  = pdfDoc.getPages();
+
+    // Embed each distinct PNG once, reuse for every placement
+    const embedded = {};
+    for (const p of placements) {
+      if (!embedded[p.sigId]) embedded[p.sigId] = await pdfDoc.embedPng(getSig(p.sigId).bytes);
+    }
+
+    for (const p of placements) {
+      const page = pages[p.page - 1];
+      const { height: pageH } = page.getSize();
+      page.drawImage(embedded[p.sigId], {
+        x: p.x / SCALE,
+        y: pageH - (p.y / SCALE) - (p.h / SCALE),   // flip Y
+        width:  p.w / SCALE,
+        height: p.h / SCALE,
+        opacity: p.opacity
+      });
+    }
+
+    const out  = await pdfDoc.save();
+    const blob = new Blob([out], { type: 'application/pdf' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'signed_document.pdf'; a.click();
+    URL.revokeObjectURL(url);
+    toast(`✓ Signed PDF downloaded (${placements.length} signature${placements.length > 1 ? 's' : ''})`, 'ok');
+  } catch(err) {
+    console.error(err);
+    toast('Error: ' + err.message, 'err');
+  } finally {
+    applyBtn.disabled = false;
+    applyBtn.textContent = 'Download signed PDF';
+  }
+});
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'show ' + type;
+  clearTimeout(el._t); el._t = setTimeout(() => { el.className = ''; }, 3400);
+}
+</script>
+</body>
+</html>
